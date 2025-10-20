@@ -63,6 +63,8 @@ class ACEnv(Env):
             raise NotImplementedError(
                 "ACEnv with supermoves is not yet implemented in this library."
             )
+        else:
+            self.supermoves = None
 
         # state space
         low = np.ones(self.max_relator_length * self.n_gen, dtype=np.int8) * (
