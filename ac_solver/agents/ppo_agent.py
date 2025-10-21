@@ -7,47 +7,74 @@ import torch
 from torch.distributions import Categorical
 from torch import nn
 
+# def build_network(nodes_counts, std=0.01):
+#     """
+#     Constructs a neural network with fully connected layers and Tanh activations based on the specified node counts.
 
-def initialize_layer(layer, std=np.sqrt(2), bias_const=0.0):
-    """
-    Initializes the weights and biases of a given layer.
+#     Parameters:
+#     nodes_counts (list of int): A list where each element represents the number of nodes in a layer.
+#     std (float): The standard deviation for initializing the final layer's weights. Default is 0.01.
 
-    Parameters:
-    layer (nn.Module): The neural network layer to initialize.
-    std (float): The standard deviation for orthogonal initialization of weights. Default is sqrt(2).
-    bias_const (float): The constant value to initialize the biases. Default is 0.0.
+#     Returns:
+#     list: A list of layers (including activation functions) representing the neural network.
+#     """
+#     layers = [initialize_layer(nn.Linear(nodes_counts[0], nodes_counts[1])), nn.Tanh()]
 
-    Returns:
-    nn.Module: The initialized layer.
-    """
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
+#     for i in range(1, len(nodes_counts) - 2):
+#         layers.append(initialize_layer(nn.Linear(nodes_counts[i], nodes_counts[i + 1])))
+#         layers.append(nn.Tanh())
 
+#     layers.append(
+#         initialize_layer(nn.Linear(nodes_counts[-2], nodes_counts[-1]), std=std)
+#     )
 
-def build_network(nodes_counts, std=0.01):
-    """
-    Constructs a neural network with fully connected layers and Tanh activations based on the specified node counts.
+#     return layers
 
-    Parameters:
-    nodes_counts (list of int): A list where each element represents the number of nodes in a layer.
-    std (float): The standard deviation for initializing the final layer's weights. Default is 0.01.
+class AbPositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len):
+        super().__init__()
+        self.pe = nn.Embedding(max_len, d_model)
+        self.register_buffer('position_ids', torch.arange(max_len))
+    def forward(self, x):
+        positions = self.position_ids[:x.size(1)]
+        return x + self.pe(positions)
 
-    Returns:
-    list: A list of layers (including activation functions) representing the neural network.
-    """
-    layers = [initialize_layer(nn.Linear(nodes_counts[0], nodes_counts[1])), nn.Tanh()]
+def build_value_transformer(**kwargs):
+    '''
+    Builds a transformer-based value network.
+    TODO: dynamically increase vocab size via BPE
+    '''
+    pass
 
-    for i in range(1, len(nodes_counts) - 2):
-        layers.append(initialize_layer(nn.Linear(nodes_counts[i], nodes_counts[i + 1])))
-        layers.append(nn.Tanh())
+def build_transformer(**kwargs):
+    '''
+    Builds a transformer-based policy network.
+    TODO: dynamically increase vocab size via BPE
+    '''
 
-    layers.append(
-        initialize_layer(nn.Linear(nodes_counts[-2], nodes_counts[-1]), std=std)
-    )
+    vocab_size = kwargs.get('vocab_size', 5)
+    max_token_len = kwargs.get('max_token_len', 512)
+    d_model = kwargs.get('d_model', 64)
+    n_layers = kwargs.get('n_layers', 3)
+    n_heads = kwargs.get('n_heads', 4)
+    activation = kwargs.get('activation', 'gelu')
+    output_dim = kwargs.get('output_dim', 1)
 
-    return layers
+    # 1. token embedding
+    layers = [nn.Embedding(vocab_size, d_model)]
 
+    # 2. positional encoding
+    layers.append(AbPositionalEncoding(d_model, max_token_len))
+
+    # transformer layers
+    for _ in range(n_layers):
+        layers.append(nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, 
+                                                 batch_first=True, activation=activation))
+
+    # output layer
+    layers.append(nn.Linear(d_model, output_dim))
+
+    return nn.Sequential(*layers)
 
 class Agent(nn.Module):
     """
@@ -70,11 +97,35 @@ class Agent(nn.Module):
         super(Agent, self).__init__()
 
         input_dim = np.prod(envs.single_observation_space.shape)
-        self.critic_nodes = [input_dim] + nodes_counts + [1]
-        self.actor_nodes = [input_dim] + nodes_counts + [envs.single_action_space.n]
 
-        self.critic = nn.Sequential(*build_network(self.critic_nodes, 1.0))
-        self.actor = nn.Sequential(*build_network(self.actor_nodes, 0.01))
+        # self.critic_nodes = [input_dim] + nodes_counts + [1]
+        # self.actor_nodes = [input_dim] + nodes_counts + [envs.single_action_space.n]
+
+        # self.critic = nn.Sequential(*build_network(self.critic_nodes, 1.0))
+        # self.actor = nn.Sequential(*build_network(self.actor_nodes, 0.01))
+        
+        critic_args = {
+            'vocab_size': 5, # {-2, -1, 0, 1, 2}
+            'max_token_len': input_dim,
+            'd_model': 64,
+            'n_layers': 3,
+            'n_heads': 4,
+            'activation': 'gelu',
+            'output_dim': 1
+        }
+        actor_args = {
+            'vocab_size': 5, # {-2, -1, 0, 1, 2}
+            'max_token_len': input_dim,
+            'd_model': 64,
+            'n_layers': 3,
+            'n_heads': 4,
+            'activation': 'gelu',
+            'output_dim': envs.single_action_space.n
+        }
+        self.critic = build_transformer(**critic_args)
+        self.critic.apply(self.initialize_layers)
+        self.actor = build_transformer(**actor_args)
+        self.actor.apply(self.initialize_layers)
 
     def get_value(self, x):
         """
@@ -86,7 +137,13 @@ class Agent(nn.Module):
         Returns:
         torch.Tensor: The value of the given state.
         """
-        return self.critic(x)
+
+        # a naive tokenizer:
+        # add 2 to make all values non-negative
+        x = (x + 2).long()
+
+        # return self.critic(x)
+        return self.critic(x)[:, -1, :]
 
     def get_action_and_value(self, x, action=None):
         """
@@ -99,11 +156,35 @@ class Agent(nn.Module):
         Returns:
         tuple: A tuple containing the action, its log probability, the entropy of the action distribution, and the value of the state.
         """
-        logits = self.actor(x)
-        value = self.critic(x)
+        # a naive tokenizer:
+        # add 2 to make all values non-negative
+        x = (x + 2).long()
+
+        # logits = self.actor(x)
+        # value = self.critic(x)
+        logits = self.actor(x)[:, -1, :]  # (B, n_actions)
+        value = self.critic(x)[:, -1, :]
         probs = Categorical(logits=logits)
 
         if action is None:
             action = probs.sample()
 
         return action, probs.log_prob(action), probs.entropy(), value
+    
+    def initialize_layers(self, layer, std=0.02, bias_const=0.0):
+        """
+        Initializes the weights and biases of all layers.
+
+        Parameters:
+        layer (nn.Module): The neural network layer to initialize. 
+        std (float): The standard deviation for orthogonal initialization of weights. Default is sqrt(2).
+        bias_const (float): The constant value to initialize the biases. Default is 0.0.
+
+        Returns:
+        nn.Module: The initialized layer.
+        """
+        if isinstance(layer, nn.Linear):
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+        elif isinstance(layer, nn.Embedding):
+            torch.nn.init.orthogonal_(layer.weight, std)        

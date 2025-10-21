@@ -101,7 +101,7 @@ def parse_args():
         "--horizon-length",
         # in previous runs, this used to be called `max-env-steps`.
         type=int,
-        default=2000,
+        default=64,
         help="number of environment steps after which a rollout is truncated.",
     )
     parser.add_argument(
@@ -119,7 +119,7 @@ def parse_args():
         "--nodes-counts",
         nargs="+",
         type=int,
-        default=[256, 256],
+        default=[512, 512],
         help="list of length=number of hidden layers. ith element is the number of nodes \
             in the ith hidden layer.",
     )
@@ -142,13 +142,13 @@ def parse_args():
     parser.add_argument(
         "--total-timesteps",
         type=int,
-        default=200000,
+        default=4000000, # 40,000,000
         help="total timesteps of the experiments",
     )
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=2.5e-4,
+        default=3e-3,
         help="the learning rate of the optimizer",
     )
     parser.add_argument(
@@ -172,25 +172,25 @@ def parse_args():
     parser.add_argument(
         "--num-envs",
         type=int,
-        default=4,
+        default=28,
         help="the number of parallel game environments.",
     )
     parser.add_argument(
         "--num-steps",
         type=int,
-        default=2000,
+        default=512,
         help="the number of steps to run in each environment per policy rollout",
     )
     parser.add_argument(
         "--anneal-lr",
         type=lambda x: bool(strtobool(x)),
-        default=True,
+        default=False,
         nargs="?",
         const=True,
         help="Toggle learning rate annealing for policy and value networks",
     )
     parser.add_argument(
-        "--gamma", type=float, default=0.99, help="the discount factor gamma"
+        "--gamma", type=float, default=0.999, help="the discount factor gamma"
     )
     parser.add_argument(
         "--gae-lambda",
