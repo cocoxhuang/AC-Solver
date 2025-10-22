@@ -2,49 +2,54 @@
 This file contains Agent class that implements actor and critic networks.
 """
 
+import math
 import numpy as np
 import torch
 from torch.distributions import Categorical
 from torch import nn
 
-# def build_network(nodes_counts, std=0.01):
-#     """
-#     Constructs a neural network with fully connected layers and Tanh activations based on the specified node counts.
+def build_network(nodes_counts, std=0.01):
+    """
+    Constructs a neural network with fully connected layers and Tanh activations based on the specified node counts.
 
-#     Parameters:
-#     nodes_counts (list of int): A list where each element represents the number of nodes in a layer.
-#     std (float): The standard deviation for initializing the final layer's weights. Default is 0.01.
+    Parameters:
+    nodes_counts (list of int): A list where each element represents the number of nodes in a layer.
+    std (float): The standard deviation for initializing the final layer's weights. Default is 0.01.
 
-#     Returns:
-#     list: A list of layers (including activation functions) representing the neural network.
-#     """
-#     layers = [initialize_layer(nn.Linear(nodes_counts[0], nodes_counts[1])), nn.Tanh()]
+    Returns:
+    list: A list of layers (including activation functions) representing the neural network.
+    """
+    layers = [nn.Linear(nodes_counts[0], nodes_counts[1]), nn.Tanh()]
 
-#     for i in range(1, len(nodes_counts) - 2):
-#         layers.append(initialize_layer(nn.Linear(nodes_counts[i], nodes_counts[i + 1])))
-#         layers.append(nn.Tanh())
+    for i in range(1, len(nodes_counts) - 2):
+        layers.append(nn.Linear(nodes_counts[i], nodes_counts[i + 1]))
+        layers.append(nn.Tanh())
 
-#     layers.append(
-#         initialize_layer(nn.Linear(nodes_counts[-2], nodes_counts[-1]), std=std)
-#     )
+    layers.append(nn.Linear(nodes_counts[-2], nodes_counts[-1]))
 
-#     return layers
+    return layers
 
 class AbPositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len):
+    def __init__(self, d_model, max_len, is_sinusoidal=False):
         super().__init__()
-        self.pe = nn.Embedding(max_len, d_model)
-        self.register_buffer('position_ids', torch.arange(max_len))
-    def forward(self, x):
-        positions = self.position_ids[:x.size(1)]
-        return x + self.pe(positions)
+        self.is_sinusoidal = is_sinusoidal
+        if is_sinusoidal:
+            position = torch.arange(max_len).unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+            pe = torch.zeros(max_len, d_model)
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.register_buffer('pe', pe)
+        else:
+            self.pe = nn.Embedding(max_len, d_model)
+            self.register_buffer('position_ids', torch.arange(max_len))
 
-def build_value_transformer(**kwargs):
-    '''
-    Builds a transformer-based value network.
-    TODO: dynamically increase vocab size via BPE
-    '''
-    pass
+    def forward(self, x):
+        if self.is_sinusoidal:
+            return x + self.pe[:x.size(1)]
+        else:
+            position_ids = self.position_ids[:x.size(1)]
+            return x + self.pe(position_ids).unsqueeze(0)
 
 def build_transformer(**kwargs):
     '''
@@ -107,23 +112,25 @@ class Agent(nn.Module):
         critic_args = {
             'vocab_size': 5, # {-2, -1, 0, 1, 2}
             'max_token_len': input_dim,
-            'd_model': 64,
-            'n_layers': 3,
-            'n_heads': 4,
+            'd_model': 512,
+            'n_layers': 1,
+            'n_heads': 1,
             'activation': 'gelu',
             'output_dim': 1
         }
         actor_args = {
             'vocab_size': 5, # {-2, -1, 0, 1, 2}
             'max_token_len': input_dim,
-            'd_model': 64,
-            'n_layers': 3,
-            'n_heads': 4,
+            'd_model': 512,
+            'n_layers': 1,
+            'n_heads': 1,
             'activation': 'gelu',
             'output_dim': envs.single_action_space.n
         }
+
         self.critic = build_transformer(**critic_args)
         self.critic.apply(self.initialize_layers)
+
         self.actor = build_transformer(**actor_args)
         self.actor.apply(self.initialize_layers)
 
