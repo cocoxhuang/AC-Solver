@@ -99,9 +99,13 @@ class ACEnv(Env):
         self.state, self.lengths = ACMove(
             action, self.state, self.max_relator_length, self.lengths
         )
+        
+        # previous length
+        prev_lengths = sum(self.lengths)
 
         done = sum(self.lengths) == 2
-        reward = self.max_reward * done - sum(self.lengths) * (1 - done)
+        step_reward = prev_lengths - sum(self.lengths)
+        reward = self.max_reward * done + step_reward * (1-done)
 
         self.count_steps += 1
         truncated = self.count_steps >= self.horizon_length
