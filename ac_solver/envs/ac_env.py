@@ -7,8 +7,8 @@ from typing import Union
 import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Discrete, Box
-from ac_solver.envs.ac_moves import ACMove
-from ac_solver.envs.utils import is_array_valid_presentation
+from ac_solver.envs.ac_moves import ACMove, substituition
+from ac_solver.envs.utils import is_array_valid_presentation, simplify_relator
 
 
 @dataclass
@@ -52,8 +52,8 @@ class ACEnvConfig:
             use_supermoves=config_dict.get("use_supermoves", cls().use_supermoves),
         )
 
-
 class ACEnv(Env):
+    
     def __init__(self, config: ACEnvConfig = ACEnvConfig()):
         self.n_gen = 2  # number of generators of the presentation
         self.max_relator_length = config.max_relator_length
@@ -76,7 +76,8 @@ class ACEnv(Env):
         self.observation_space = Box(low, high, dtype=np.int8)
 
         # action space
-        self.action_space = Discrete(12)
+        self._substitution_dict = self.substitution_dict()
+        self.action_space = Discrete(len(self._substitution_dict))
 
         # max-reward needed for reward function
         self.max_reward = self.horizon_length * self.max_relator_length * self.n_gen
@@ -94,10 +95,59 @@ class ACEnv(Env):
         ]  # lengths of relators in the current state
         self.actions = []  # list of actions from the initial state
 
+    def get_action_mask(self, state=None):
+        """
+        Compute a boolean mask over actions indicating which substitutions are valid
+        (i.e., will not increase the length of either relator beyond `max_relator_length`).
+
+        Parameters:
+        state (np.ndarray, optional): Presentation state to evaluate. If None, uses current `self.state`.
+
+        Returns:
+        np.ndarray: Boolean array of shape (num_actions,) where True denotes a valid action.
+        """
+        s = np.copy(self.state) if state is None else np.array(state, copy=True)
+        maxL = self.max_relator_length
+        # Extract non-padded relators
+        r1, r2 = s[:self.max_relator_length], s[self.max_relator_length:]
+        r1, r2 = r1[r1 != 0], r2[r2 != 0]
+
+        mask = np.ones(self.action_space.n, dtype=bool)
+        # Evaluate each substitution's impact after simplification
+        for ind, action in self._substitution_dict.items():
+            try:
+                r1p, r2p = substituition(r1, r2, action)
+                # Simplify with padded=False to get resultant lengths; assertion will fire if overflow
+                _, len1 = simplify_relator(r1p, maxL, cylically_reduce=True, padded=False)
+                _, len2 = simplify_relator(r2p, maxL, cylically_reduce=True, padded=False)
+                mask[ind] = (len1 <= maxL) and (len2 <= maxL)
+            except AssertionError as ve:
+                if "Increase max length!" in str(ve):
+                    mask[ind] = False
+                else:
+                    raise ve
+            except Exception as e:
+                raise e
+
+        return mask
+
+    def substitution_dict(self) -> dict:
+        '''Create a substitution dictionary mapping action indices to action tuples.'''
+        substitution_dict = {}
+        ind = 0
+        for relator in [0,1]:
+            for i in range(self.max_relator_length):
+                for j in range(self.max_relator_length):
+                    for inverse in [True, False]:
+                        substitution_dict[ind] = (relator, i, j, inverse)
+                        ind += 1
+        return substitution_dict
+
     def step(self, action):
-        self.actions += [action]
+        self.actions += [self._substitution_dict[action]]
+        # now the action is a tuple 
         self.state, self.lengths = ACMove(
-            action, self.state, self.max_relator_length, self.lengths
+            self._substitution_dict[action], self.state, self.max_relator_length, self.lengths
         )
 
         done = sum(self.lengths) == 2

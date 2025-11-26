@@ -4,3 +4,7 @@ dist/
 *.txt
 *.pt
 ac_solver/agents/checkpoints/
+__pycache__/
+pretrain/checkpoints/
+.venv/
+env/

@@ -1,5 +1,5 @@
-from ac_solver.envs.utils import simplify_presentation
-
+from ac_solver.envs.utils import simplify_presentation, simplify_relator
+import numpy as np
 
 def concatenate_relators(presentation, max_relator_length, i, j, sign, lengths):
     """
@@ -155,64 +155,207 @@ def conjugate(presentation, max_relator_length, i, j, sign, lengths):
 
     return presentation, lengths
 
+def substituition(r1: np.ndarray, r2: np.ndarray, action: tuple) -> tuple:
+    """
+    Reference: https://github.com/Math-AI-Caltech/AC-SolverX/blob/main/classical_search/AC_substitution_optimized.ipynb
+    Applies a substitution to relators r1 and r2 based on the given action.
 
-def ACMove(move_id, presentation, max_relator_length, lengths, cyclical=True):
+    Args:
+        r1 (np.ndarray): The first relator, with the padded zeros removed.
+        r2 (np.ndarray): The second relator, with the padded zeros removed.
+        action (tuple): A tuple (relator, i, j, inverse_indicator) where
+            relator: 0 or 1, index of the relator to change.
+            i: int, rotation amount for r1.
+            j: int, rotation amount for r2.
+            inverse_indicator: boolean, whether to invert r2 before substitution.
+            Note that r2 is always the lexicographically larger relator.
+
+    TODO: verify correctness.
+    """
+    relator, i, j, inverse_indicator = action
+    r2 = invert(r2) if inverse_indicator else r2
+
+    r1 = np.roll(r1, 2*i)
+    r2 = np.roll(r2, 2*j)
+    neighbour = np.concatenate([r1, r2])
+
+    if relator == 0:    # then replace r1
+        return neighbour, r2
+    else:               # then replace r2
+        return r1, neighbour
+    
+def lex_cmp(c1 : int, c2: int) -> bool:
+    """
+    Compare two charaters c1 and c2 in lexiographic order,
+    where the order is defined as: 
+    2 < -2 < -1 < 1, i.e.
+    Y < y < X < x
+    Returns True if c1 >= c2.
+    """
+    assert c1 != c2, "Cannot compare equal characters."
+    if c1 == 2:
+        return False
+    elif c1 == -2:
+        return True if c2 == 2 else False
+    elif c1 == -1:
+        return False if c2 == 1 else True
+    else:   # c1 == 1 or 'x'
+        return True
+    
+def lex_cmp_array(a: np.ndarray, b: np.ndarray) -> bool:
+    """
+    Compare two numpy arrays of shape (n, 2) with bool types in lexiographic order,
+    where the order is defined as:
+    2 < -2 < -1 < 1, i.e.
+    Y < y < X < x.
+    Returns True if a > b.
+    """
+    assert a.shape == b.shape, "Cannot compare arrays of different shapes."
+    for x, y in zip(a, b):
+        if x == y:
+            continue
+        else:
+            return lex_cmp(x, y)
+    
+    # If we reach here the arrays are equal.
+    return False
+
+def find_minimal_rotation(rel: np.ndarray) -> np.ndarray:
+    '''
+    Find the minimal rotation of a relator using Booth's algorithm.
+
+    Uses the ordering `2 < -2 < -1 < 1` for the characters, 
+    i.e. `Y < y < X < x`.
+
+    TODO: verify correctness.
+    '''
+    n = len(rel)
+    rel = np.concatenate([rel, rel])
+    f = np.full(2 * n, -1, dtype=np.int32)
+    k = 0
+    for j in range(1, 2 * n):
+        i = f[j - k - 1]
+        while i != -1 and (not rel[j] == rel[k + i + 1]):
+            if not lex_cmp(rel[j], rel[k + i + 1]):
+                k = j - i - 1
+            i = f[i]
+        if i == -1 and (not rel[j] == rel[k]):
+            if not lex_cmp(rel[j], rel[k]):
+                k = j
+            f[j - k] = -1
+        else:
+            f[j - k] = i + 1
+    return rel[k:k + n]
+
+def invert(r: np.ndarray) -> np.ndarray:
+    """Returns the inverse of a relator r."""
+    return -r[::-1]
+
+def canonical_relator(r: np.ndarray) -> np.ndarray:
+    """
+    Returns the canonical form of a relator r, which is the
+    lexicographically smallest rotation of r or its inverse.
+    """
+    if len(r) == 0:
+        return r
+    r_min = find_minimal_rotation(r)
+    inv_min = find_minimal_rotation(invert(r))
+    if lex_cmp_array(r_min, inv_min):
+        return inv_min
+    return r_min
+    
+def canonical_pair(r1: np.ndarray, r2: np.ndarray, len_r1: int, len_r2: int) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """
+    Returns the canonical pair of relators (r1, r2) such that
+    (0) r1 and r2 are converted to their canonical_relator forms, and
+    (1) len(r1) is smaller than len(r2), or
+    (2) if they are equal, r1 is cyclically smaller than r2.
+    """
+    r1 = canonical_relator(r1)
+    r2 = canonical_relator(r2)
+    if len(r1) > len(r2):
+        return r2, r1, len_r2, len_r1
+    elif (len(r1) == len(r2) and lex_cmp_array(r1, r2)):
+        return r2, r1, len_r2, len_r1
+    else:
+        return r1, r2, len_r1, len_r2
+
+def ACMove(action: tuple, presentation: np.ndarray, max_relator_length: int, 
+           lengths: list, cylically_reduce=True) -> tuple[np.ndarray, list]:
     """
     Applies an AC move (concatenation or conjugation) to a presentation and returns the resultant presentation.
     The move to apply and the relator it is applied to are decided by move_id.
 
     Parameters:
-    move_id: An int in range [0, 11] (both inclusive), deciding which AC move to apply.
-            Odd values affect r_1; even values affect r_0.
-            The complete mappling between move_id and moves is as below:
-            0. r_1 --> r_1 r_0
-            1. r_0 --> r_0 r_1^{-1}
-            2. r_1 --> r_1 r_0^{-1}
-            3. r_0 --> r_0 r_1
-            4: r_1 --> x_0^{-1} r_1 x_0
-            5: r_0 ---> x_1^{-1} r_0 x_1
-            6: r_1 --> x_1^{-1} r_1 x_1
-            7: r_0 ---> x_0 r_0 x_0^{-1}
-            8: r_1 --> x_0 r_1 x_0^{-1}
-            9: r_0 --> x_1 r_0 x_1^{-1}
-            10: r_1 --> x_1 r_1 x_1^{-1}
-            11: r_0 --> x_0^{-1} r_0 x_0
-    presentation: A NumPy Array representation the input presentation.
+    action: An tuple (relator, i, j, inverse_indicator) where:
+        relator: 0 or 1, index of the relator to change.
+        i: the rotation amount for r1.
+        j: the rotation amount for r2.
+        inverse_indicator: whether to invert r2 before substitution.
+        Note that r2 is always the lexicographically larger relator.
+    presentation: A NumPy Array representation the input presentation <r_0, r_1>.
+        Each relator is represented as a fixed-length array of integers, padded with zeros on the right.
     max_relator_length: The maximum length a relator is allowed to take.
                         If the application of an AC move results in a relator with length larger than max_relator_length,
                         the original presentation is returned.
     lengths: A list of lengths of words in the presentation.
-    cyclical: A bool; whether to cyclically reduce words in the resultant presentation or not.
+    cylically_reduce: A bool; whether to cyclically reduce words in the resultant presentation or not.
     """
 
-    assert move_id in range(
-        0, 12
-    ), f"Expect n to be in range 0-11 (both inclusive); got {move_id}"
+    # get non-padded relators
+    r1, r2 = presentation[:max_relator_length], presentation[max_relator_length:]
+    r1, r2 = r1[r1.nonzero()], r2[r2.nonzero()]
 
-    if move_id in range(0, 4):
-        move_id += 1
-        i = move_id % 2
-        j = 1 - i
-        sign_parity = ((move_id - i) // 2) % 2
-        sign = (-1) ** sign_parity
-        move = concatenate_relators
-    elif move_id in range(4, 12):
-        move_id += 1
-        i = move_id % 2
-        jp = ((move_id - i) // 2) % 2  # = 0 or 1
-        sign_parity = ((move_id - i - 2 * jp) // 4) % 2
-        j = jp + 1  # = 1 or 2
-        sign = (-1) ** sign_parity
-        move = conjugate
+    # apply the move
+    r1, r2 = substituition(r1, r2, action)
 
-    presentation, lengths = move(
-        presentation=presentation,
-        max_relator_length=max_relator_length,
-        i=i,
-        j=j,
-        sign=sign,
-        lengths=lengths,
-    )
+    # simplify r1 and r2
+    try:
+        r1, len_r1 = simplify_relator(r1, max_relator_length, cylically_reduce=True, padded=False)
+        r2, len_r2 = simplify_relator(r2, max_relator_length, cylically_reduce=True, padded=False)
+    except Exception as e:
+        r1, len_r1 = r1, len(r1)
+        r2, len_r2, max_relator_length = r2, len(r2), max_relator_length
+        print("r1:", r1)
+        print("r2:", r2)
+        print("len_r1:", len_r1)
+        print("len_r2:", len_r2)
+        print("max_relator_length:", max_relator_length)
+        raise ValueError("Error simplifying r2")
+
+    # change to canonical pair
+    r1, r2, len_r1, len_r2 = canonical_pair(r1, r2, len_r1, len_r2)
+
+    # padd back to fixed length
+    r1 = np.concatenate([r1, np.zeros(max_relator_length - len(r1), dtype=int)])
+    r2 = np.concatenate([r2, np.zeros(max_relator_length - len(r2), dtype=int)])
+    presentation = np.concatenate([r1, r2])
+    lengths = [len_r1, len_r2]
+
+    # if move_id in range(0, 4):
+    #     move_id += 1
+    #     i = move_id % 2
+    #     j = 1 - i
+    #     sign_parity = ((move_id - i) // 2) % 2
+    #     sign = (-1) ** sign_parity
+    #     move = concatenate_relators
+    # elif move_id in range(4, 12):
+    #     move_id += 1
+    #     i = move_id % 2
+    #     jp = ((move_id - i) // 2) % 2  # = 0 or 1
+    #     sign_parity = ((move_id - i - 2 * jp) // 4) % 2
+    #     j = jp + 1  # = 1 or 2
+    #     sign = (-1) ** sign_parity
+    #     move = conjugate
+
+    # presentation, lengths = move(
+    #     presentation=presentation,
+    #     max_relator_length=max_relator_length,
+    #     i=i,
+    #     j=j,
+    #     sign=sign,
+    #     lengths=lengths,
+    # )
 
     # TODO: simplify_presentation seems to do something non-trivial even when
     # cyclical=False. I ran into trouble by putting an `if cyclical==False` cond
@@ -220,12 +363,11 @@ def ACMove(move_id, presentation, max_relator_length, lengths, cyclical=True):
     # This is confusing because I thought cojugate and concatenate_relators
     # already do the cyclical=False simplification.
 
-    # TODO: cyclical should probably be called cylically_reduce.
-    presentation, lengths = simplify_presentation(
-        presentation=presentation,
-        max_relator_length=max_relator_length,
-        lengths_of_words=lengths,
-        cyclical=cyclical,
-    )
+    # presentation, lengths = simplify_presentation(
+    #     presentation=presentation,
+    #     max_relator_length=max_relator_length,
+    #     lengths_of_words=lengths,
+    #     cylically_reduce=cylically_reduce,
+    # )
 
     return presentation, lengths

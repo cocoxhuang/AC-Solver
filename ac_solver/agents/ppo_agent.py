@@ -88,18 +88,33 @@ class Agent(nn.Module):
         """
         return self.critic(x)
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, action_mask=None):
         """
         Computes the action to take and its associated value, log probability, and entropy.
 
         Parameters:
         x (torch.Tensor): The input tensor representing the state.
         action (torch.Tensor, optional): The action to evaluate. If None, a new action will be sampled.
+        action_mask (torch.Tensor, optional): A boolean tensor of shape (batch_size, num_actions)
+            indicating valid (True) and invalid (False) actions. If provided, invalid actions will be
+            masked out by setting their logits to a large negative value to prevent selection.
 
         Returns:
         tuple: A tuple containing the action, its log probability, the entropy of the action distribution, and the value of the state.
         """
         logits = self.actor(x)
+        # Apply action mask if provided
+        if action_mask is not None:
+            # Mask invalid actions by assigning a very negative logit
+            masked_logits = logits.masked_fill(~action_mask, -1e9)
+
+            # Fallback for rows where all actions are masked: use original logits to avoid NaNs
+            all_invalid = action_mask.sum(dim=-1) == 0
+            if torch.any(all_invalid):
+                raise ValueError("All actions are illegal for a sample in the batch: a relator exceeding max_relator_length.")
+
+            logits = masked_logits
+
         value = self.critic(x)
         probs = Categorical(logits=logits)
 

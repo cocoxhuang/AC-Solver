@@ -16,7 +16,7 @@ from torch import nn
 
 
 def get_curr_lr(n_update, lr_decay, warmup, max_lr, min_lr, total_updates):
-    """
+    """F
     Calculates the current learning rate based on the update step, learning rate decay schedule,
     warmup period, and other parameters.
 
@@ -112,6 +112,7 @@ def ppo_training_loop(
         )
 
     print(f"total number of timesteps: {args.total_timesteps}, updates: {num_updates}")
+
     for update in tqdm(
         range(1, num_updates + 1), desc="Training Progress", total=num_updates
     ):
@@ -143,8 +144,13 @@ def ppo_training_loop(
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
+                # Build action masks per-env to prevent overflow moves
+                masks_np = np.stack(
+                    [envs.envs[i].get_action_mask() for i in range(args.num_envs)]
+                )
                 action, logprob, _, value = agent.get_action_and_value(
-                    next_obs
+                    next_obs,
+                    action_mask=torch.tensor(masks_np, device=device),
                 )  # shapes: n_envs, n_envs, n_envs, (n_envs, 1)
                 values[step] = value.flatten()  # num_envs
             actions[step] = action
@@ -273,12 +279,21 @@ def ppo_training_loop(
 
         for epoch in range(args.update_epochs):
             np.random.shuffle(b_inds)
-            for start in range(0, args.batch_size, args.minibatch_size):
+            for start in tqdm(range(0, args.batch_size, args.minibatch_size),
+                              desc=f"Epoch {epoch+1}/{args.update_epochs} - Update Phase", 
+                              leave=False):
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
+                # Compute masks for the minibatch observations using env logic
+                mb_states_np = b_obs[mb_inds].detach().cpu().numpy()
+                mb_masks_np = np.stack(
+                    [envs.envs[0].get_action_mask(state=mb_states_np[k]) for k in range(mb_states_np.shape[0])]
+                )
                 _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                    b_obs[mb_inds], b_actions.long()[mb_inds]
+                    b_obs[mb_inds],
+                    b_actions.long()[mb_inds],
+                    action_mask=torch.tensor(mb_masks_np, device=device),
                 )  # .long() converts dtype to int64
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = (

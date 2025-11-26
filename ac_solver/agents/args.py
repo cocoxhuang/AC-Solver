@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument(
         "--wandb-project-name",
         type=str,
-        default="AC-Solver-PPO",
+        default="ac-substitution-ppo",
         help="the wandb's project name",
     )
     parser.add_argument(
@@ -80,7 +80,7 @@ def parse_args():
     parser.add_argument(
         "--max-relator-length",
         type=int,
-        default=7,
+        default=19, # used to be 7
         help="the maximum length a relator is allowed to take when acted by AC moves",
     )
     parser.add_argument(
@@ -178,7 +178,7 @@ def parse_args():
     parser.add_argument(
         "--num-steps",
         type=int,
-        default=512,
+        default=64, # default=512,
         help="the number of steps to run in each environment per policy rollout",
     )
     parser.add_argument(
@@ -277,6 +277,15 @@ def parse_args():
         type=float,
         default=0.00001,
         help="epsilon hyperparameter for PyTorch Adam Optimizer",
+    )
+
+    # pretraining specific arguments
+    parser.add_argument(
+        "--pretrained-actor-model-path",
+        type=str,
+        # default="pretrain/checkpoints/model.pth",   # default=None,
+        default=None,
+        help="path to the pretrained actor model file; if None, no pretraining is used",
     )
 
     args = parser.parse_args()

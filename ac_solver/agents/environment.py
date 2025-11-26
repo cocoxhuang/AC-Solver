@@ -84,7 +84,7 @@ def get_env(args):
 
         # Set the maximum relator length; default is 36, which is derived from max(4n+2) for 1 <= n <= 7
         # This can be modified for experimentation
-        args.max_relator_length = 36
+        # args.max_relator_length = 36
         initial_states = [
             change_max_relator_length_of_presentation(
                 initial_state, args.max_relator_length

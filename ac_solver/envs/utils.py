@@ -172,7 +172,7 @@ def change_max_relator_length_of_presentation(presentation, new_max_length):
     return new_presentation
 
 
-def simplify_relator(relator, max_relator_length, cyclical=False, padded=True):
+def simplify_relator(relator, max_relator_length, cylically_reduce=False, padded=True):
     """
     Simplifies a relator by removing neighboring inverses. For example, if input is x^2 y y^{-1} x, the output will be x^3.
 
@@ -183,7 +183,7 @@ def simplify_relator(relator, max_relator_length, cyclical=False, padded=True):
     max_relator_length (int): Upper bound on the length of the simplified relator.
                               If, after simplification, the relator length > max_relator_length, an assertion error is given.
                               This bound is placed so as to make the search space finite. Say,
-    cyclical (bool): A bool to specify whether to remove inverses on opposite ends of the relator.
+    cylically_reduce (bool): A bool to specify whether to remove inverses on opposite ends of the relator.
                      For example, when true, the function will reduce x y x^{-1} to y.
                      This is equivalent to conjugation by a word.
     padded (bool): A bool to specify whether to pad the output with zeros on the right end.
@@ -217,7 +217,7 @@ def simplify_relator(relator, max_relator_length, cyclical=False, padded=True):
             pos += 1
 
     # if cyclical, also remove inverses from the opposite ends
-    if cyclical and relator_length > 0:
+    if cylically_reduce and relator_length > 0:
         pos = 0
         while relator[pos] == -relator[relator_length - pos - 1]:
             pos += 1
@@ -241,7 +241,7 @@ def simplify_relator(relator, max_relator_length, cyclical=False, padded=True):
 
 
 def simplify_presentation(
-    presentation, max_relator_length, lengths_of_words, cyclical=True
+    presentation, max_relator_length, lengths_of_words, cylically_reduce=True
 ):
     """
     Simplifies a presentation by simplifying each of its relators. (See `simplify_relator` for more details.)
@@ -268,7 +268,7 @@ def simplify_presentation(
         simplified_relator, length_i = simplify_relator(
             relator=presentation[i * max_relator_length : (i + 1) * max_relator_length],
             max_relator_length=max_relator_length,
-            cyclical=cyclical,
+            cylically_reduce=cylically_reduce,
             padded=True,
         )
 
