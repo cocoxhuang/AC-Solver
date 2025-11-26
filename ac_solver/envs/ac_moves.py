@@ -169,14 +169,12 @@ def substituition(r1: np.ndarray, r2: np.ndarray, action: tuple) -> tuple:
             j: int, rotation amount for r2.
             inverse_indicator: boolean, whether to invert r2 before substitution.
             Note that r2 is always the lexicographically larger relator.
-
-    TODO: verify correctness.
     """
     relator, i, j, inverse_indicator = action
     r2 = invert(r2) if inverse_indicator else r2
 
-    r1 = np.roll(r1, 2*i)
-    r2 = np.roll(r2, 2*j)
+    r1 = np.roll(r1, i)
+    r2 = np.roll(r2, j)
     neighbour = np.concatenate([r1, r2])
 
     if relator == 0:    # then replace r1
